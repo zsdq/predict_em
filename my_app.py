@@ -340,6 +340,7 @@ if submit_button:
                             st.error(f"1")
                         except:
                             # 如果模型不存在，跳过
+                            st.error(f"2")
                             continue
 
                     # 显示预测结果
