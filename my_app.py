@@ -8,7 +8,7 @@ from autogluon.tabular import TabularPredictor
 import tempfile
 import base64
 from io import BytesIO
-
+import os
 
 # 添加 CSS 样式
 st.markdown(
@@ -210,6 +210,12 @@ required_descriptors = ["MAXdssC", "VSA_EState7", "SMR_VSA10", "PEOE_VSA8"]
 # 分子图像路径
 image_path = None
 
+# 设置模型路径 - 请确保此路径正确
+PREDICTOR_PATH = "models/ag-20250508_124428"
+
+# 特征顺序 - 必须与训练模型时的顺序一致
+FEATURE_ORDER = ["Et30", "SP", "SdP", "SA", "SB", 
+                 "MAXdssC", "VSA_EState7", "SMR_VSA10", "PEOE_VSA8"]
 
 def mol_to_image(mol, size=(300, 300)):
     """将分子转换为图像并返回base64编码"""
@@ -219,28 +225,31 @@ def mol_to_image(mol, size=(300, 300)):
     svg = d2d.GetDrawingText()
     return svg
 
-
 def get_descriptors(mol):
     """获取指定的分子描述符"""
-    # 计算RDKit描述符
-    rdkit_descs = {
-        "VSA_EState7": Descriptors.VSA_EState7(mol),
-        "SMR_VSA10": Descriptors.SMR_VSA10(mol),
-        "PEOE_VSA8": Descriptors.PEOE_VSA8(mol),
-    }
-
-    # 计算Mordred描述符
-    calc = Calculator(descriptors, ignore_3D=True)
-    mordred_desc = calc(mol)
-
-    # 获取MAXdssC描述符
-    maxdssc = mordred_desc["MAXdssC"] if "MAXdssC" in mordred_desc else None
-
-    return {
-        "MAXdssC": maxdssc,
-        **rdkit_descs
-    }
-
+    try:
+        # 计算RDKit描述符
+        rdkit_descs = {
+            "VSA_EState7": Descriptors.VSA_EState7(mol),
+            "SMR_VSA10": Descriptors.SMR_VSA10(mol),
+            "PEOE_VSA8": Descriptors.PEOE_VSA8(mol),
+        }
+        
+        # 计算Mordred描述符
+        calc = Calculator(descriptors, ignore_3D=True)
+        mordred_desc = calc(mol)
+        
+        # 确保获取到MAXdssC描述符
+        maxdssc = mordred_desc.get("MAXdssC", 0.0)  # 默认值
+        
+        return {
+            "MAXdssC": maxdssc,
+            **rdkit_descs
+        }
+    
+    except Exception as e:
+        st.error(f"Descriptor calculation failed: {str(e)}")
+        return None
 
 # 如果点击提交按钮
 if submit_button:
@@ -274,6 +283,10 @@ if submit_button:
                     # 计算指定描述符
                     st.info("Calculating molecular descriptors...")
                     desc_values = get_descriptors(mol)
+                    
+                    if desc_values is None:
+                        st.error("Failed to calculate molecular descriptors. Please check your SMILES input.")
+                        st.stop()
 
                     # 创建输入数据表
                     input_data = {
@@ -309,37 +322,50 @@ if submit_button:
                         "PEOE_VSA8": [desc_values["PEOE_VSA8"]]
                     }
 
-                    predict_df = pd.DataFrame(predict_data)
+                    predict_df = pd.DataFrame(predict_data)[FEATURE_ORDER]
 
                     # 加载模型并预测
                     st.info("Loading the model and predicting the emission wavelength...")
-                    predictor = TabularPredictor.load("ag-20250508_124428")
+                    
+                    try:
+                        # 检查模型路径是否存在
+                        if not os.path.exists(PREDICTOR_PATH):
+                            st.error(f"Model not found at path: {PREDICTOR_PATH}")
+                            st.error("Please make sure the model files are in the correct directory.")
+                            st.stop()
+                            
+                        predictor = TabularPredictor.load(PREDICTOR_PATH)
+                        
+                        # 获取实际可用的模型列表
+                        available_models = predictor.get_model_names()
+                        st.write(f"Available models: {', '.join(available_models)}")
+                        
+                        # 获取预测结果
+                        predictions_dict = {}
+                        for model in available_models:
+                            try:
+                                predictions = predictor.predict(predict_df, model=model)
+                                predictions_dict[model] = predictions.astype(int).apply(lambda x: f"{x} nm")
+                            except Exception as e:
+                                st.error(f"Prediction failed for model {model}: {str(e)}")
+                                predictions_dict[model] = "Error"
+                        
+                        # 显示预测结果
+                        st.write("Prediction Results:")
+                        st.markdown(
+                            "**Note:** WeightedEnsemble_L2 is a meta-model combining predictions from other models.")
+                        
+                        if predictions_dict:
+                            results_df = pd.DataFrame(predictions_dict)
+                            st.dataframe(results_df)
+                        else:
+                            st.error("All model predictions failed.")
 
-                    # 指定模型列表
-                    model_options = [
-                        "LightGBMLarge", "XGBoost", "LightGBM",
-                        "WeightedEnsemble_L2", "LightGBMXT",
-                        "CatBoost", "NeuralNetTorch"
-                    ]
-
-                    # 获取预测结果
-                    predictions_dict = {}
-                    for model in model_options:
-                        try:
-                            predictions = predictor.predict(predict_df, model=model)
-                            predictions_dict[model] = predictions.astype(int).apply(lambda x: f"{x} nm")
-                        except:
-                            # 如果模型不存在，跳过
-                            continue
-
-                    # 显示预测结果
-                    st.write("Prediction Results:")
-                    st.markdown(
-                        "**Note:** WeightedEnsemble_L2 is a meta-model combining predictions from other models.")
-                    results_df = pd.DataFrame(predictions_dict)
-                    st.dataframe(results_df)
+                    except Exception as e:
+                        st.error(f"Model loading or prediction failed: {str(e)}")
+                        st.error("Please check the model path and ensure all dependencies are installed.")
 
                 else:
                     st.error("Invalid SMILES input. Please check the format.")
             except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
+                st.error(f"An unexpected error occurred: {str(e)}")
