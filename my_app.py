@@ -337,6 +337,7 @@ if submit_button:
                         try:
                             predictions = predictor.predict(predict_df, model=model)
                             predictions_dict[model] = predictions.astype(int).apply(lambda x: f"{x} nm")
+                            st.error(f"1")
                         except:
                             # 如果模型不存在，跳过
                             continue
