@@ -223,18 +223,27 @@ def mol_to_image(mol, size=(300, 300)):
 def get_descriptors(mol):
     """获取指定的分子描述符"""
     # 计算RDKit描述符
-    rdkit_descs = {
-        "VSA_EState7": Descriptors.VSA_EState7(mol),
-        "SMR_VSA10": Descriptors.SMR_VSA10(mol),
-        "PEOE_VSA8": Descriptors.PEOE_VSA8(mol),
-    }
+    try:
+        rdkit_descs = {
+            "VSA_EState7": Descriptors.VSA_EState7(mol),
+            "SMR_VSA10": Descriptors.SMR_VSA10(mol),
+            "PEOE_VSA8": Descriptors.PEOE_VSA8(mol),
+        }
+    except:
+        # 如果计算失败，使用默认值
+        rdkit_descs = {
+            "VSA_EState7": 0.0,
+            "SMR_VSA10": 0.0,
+            "PEOE_VSA8": 0.0,
+        }
 
     # 计算Mordred描述符
-    calc = Calculator(descriptors, ignore_3D=True)
-    mordred_desc = calc(mol)
-
-    # 获取MAXdssC描述符
-    maxdssc = mordred_desc["MAXdssC"] if "MAXdssC" in mordred_desc else None
+    try:
+        calc = Calculator(descriptors, ignore_3D=True)
+        mordred_desc = calc(mol)
+        maxdssc = mordred_desc["MAXdssC"] if "MAXdssC" in mordred_desc else 0.0
+    except:
+        maxdssc = 0.0
 
     return {
         "MAXdssC": maxdssc,
